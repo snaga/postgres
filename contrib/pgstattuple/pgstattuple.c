@@ -41,9 +41,22 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pgstattuple);
 PG_FUNCTION_INFO_V1(pgstattuplebyid);
+PG_FUNCTION_INFO_V1(pgstattuple2);
 
 extern Datum pgstattuple(PG_FUNCTION_ARGS);
 extern Datum pgstattuplebyid(PG_FUNCTION_ARGS);
+extern Datum pgstattuple2(PG_FUNCTION_ARGS);
+
+#define SAMPLE_SIZE 3000
+
+typedef struct pgstattuple_block_stats
+{
+	uint64		tuple_count;
+	uint64		tuple_len;
+	uint64		dead_tuple_count;
+	uint64		dead_tuple_len;
+	uint64		free_space;		/* free/reusable space in bytes */
+} pgstattuple_block_stats;
 
 /*
  * struct pgstattuple_type
@@ -66,8 +79,9 @@ typedef void (*pgstat_page) (pgstattuple_type *, Relation, BlockNumber,
 
 static Datum build_pgstattuple_type(pgstattuple_type *stat,
 					   FunctionCallInfo fcinfo);
-static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo);
+static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo, bool enable_sample);
 static Datum pgstat_heap(Relation rel, FunctionCallInfo fcinfo);
+static Datum pgstat_heap_sample(Relation rel, FunctionCallInfo fcinfo);
 static void pgstat_btree_page(pgstattuple_type *stat,
 				  Relation rel, BlockNumber blkno,
 				  BufferAccessStrategy bstrategy);
@@ -81,6 +95,11 @@ static Datum pgstat_index(Relation rel, BlockNumber start,
 			 pgstat_page pagefn, FunctionCallInfo fcinfo);
 static void pgstat_index_page(pgstattuple_type *stat, Page page,
 				  OffsetNumber minoff, OffsetNumber maxoff);
+static void compute_parameters(pgstattuple_block_stats *block_stats,
+				   BlockNumber sample_size, BlockNumber nblocks,
+				   uint64 *tuple_count, uint64 *tuple_len,
+				   uint64 *dead_tuple_count, uint64 *dead_tuple_len,
+				   uint64 *free_space);
 
 /*
  * build_pgstattuple_type -- build a pgstattuple_type tuple
@@ -175,7 +194,7 @@ pgstattuple(PG_FUNCTION_ARGS)
 	relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
 	rel = relation_openrv(relrv, AccessShareLock);
 
-	PG_RETURN_DATUM(pgstat_relation(rel, fcinfo));
+	PG_RETURN_DATUM(pgstat_relation(rel, fcinfo, false));
 }
 
 Datum
@@ -192,14 +211,14 @@ pgstattuplebyid(PG_FUNCTION_ARGS)
 	/* open relation */
 	rel = relation_open(relid, AccessShareLock);
 
-	PG_RETURN_DATUM(pgstat_relation(rel, fcinfo));
+	PG_RETURN_DATUM(pgstat_relation(rel, fcinfo, false));
 }
 
 /*
  * pgstat_relation
  */
 static Datum
-pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
+pgstat_relation(Relation rel, FunctionCallInfo fcinfo, bool enable_sample)
 {
 	const char *err;
 
@@ -219,6 +238,9 @@ pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
 		case RELKIND_MATVIEW:
 		case RELKIND_TOASTVALUE:
 		case RELKIND_SEQUENCE:
+			if ( enable_sample )
+				return pgstat_heap_sample(rel, fcinfo);
+
 			return pgstat_heap(rel, fcinfo);
 		case RELKIND_INDEX:
 			switch (rel->rd_rel->relam)
@@ -534,4 +556,226 @@ pgstat_index_page(pgstattuple_type *stat, Page page,
 			stat->tuple_len += ItemIdGetLength(itemid);
 		}
 	}
+}
+
+static void
+compute_parameters(pgstattuple_block_stats *block_stats, BlockNumber sample_size, BlockNumber nblocks,
+				   uint64 *tuple_count, uint64 *tuple_len,
+				   uint64 *dead_tuple_count, uint64 *dead_tuple_len,
+				   uint64 *free_space)
+{
+	double tuple_count_avg;
+	double tuple_len_avg;
+	double dead_tuple_count_avg;
+	double dead_tuple_len_avg;
+	double free_space_avg;
+
+	double tuple_count_sd;
+	double tuple_len_sd;
+	double dead_tuple_count_sd;
+	double dead_tuple_len_sd;
+	double free_space_sd;
+
+	double tuple_count_se;
+	double tuple_len_se;
+	double dead_tuple_count_se;
+	double dead_tuple_len_se;
+	double free_space_se;
+
+	int i;
+	
+	/*
+	 * sample average
+	 */
+	tuple_count_avg      = 0;
+	tuple_len_avg        = 0;
+	dead_tuple_count_avg = 0;
+	dead_tuple_len_avg   = 0;
+	free_space_avg       = 0;
+	
+	for (i=0 ; i<sample_size ; i++)
+	{
+		tuple_count_avg      += block_stats[i].tuple_count;
+		tuple_len_avg        += block_stats[i].tuple_len;
+		dead_tuple_count_avg += block_stats[i].dead_tuple_count;
+		dead_tuple_len_avg   += block_stats[i].dead_tuple_len;
+		free_space_avg       += block_stats[i].free_space;
+	}
+
+	tuple_count_avg      = tuple_count_avg / sample_size;
+	tuple_len_avg        = tuple_len_avg / sample_size;
+	dead_tuple_count_avg = dead_tuple_count_avg / sample_size;
+	dead_tuple_len_avg   = dead_tuple_len_avg / sample_size;
+	free_space_avg       = free_space_avg / sample_size;
+
+#ifdef NOT_USED
+	elog(NOTICE, "pgstattuple2: AVG tuple_count %.2f, tuple_len %.2f, dead_tuple_count %.2f, dead_tuple_len %.2f, free_space %.2f", 
+		 tuple_count_avg,
+		 tuple_len_avg,
+		 dead_tuple_count_avg,
+		 dead_tuple_len_avg,
+		 free_space_avg);
+#endif
+
+	/*
+	 * sample standard deviation
+	 */
+	tuple_count_sd      = 0;
+	tuple_len_sd        = 0;
+	dead_tuple_count_sd = 0;
+	dead_tuple_len_sd   = 0;
+	free_space_sd       = 0;
+
+	for (i=0 ; i<sample_size ; i++)
+	{
+		tuple_count_sd      += pow(block_stats[i].tuple_count - tuple_count_avg, 2);
+		tuple_len_sd        += pow(block_stats[i].tuple_len - tuple_len_avg, 2);
+		dead_tuple_count_sd += pow(block_stats[i].dead_tuple_count - dead_tuple_count_avg, 2);
+		dead_tuple_len_sd   += pow(block_stats[i].dead_tuple_len - dead_tuple_len_avg, 2);
+		free_space_sd       += pow(block_stats[i].free_space - free_space_avg, 2);
+	}
+
+	tuple_count_sd      = sqrt(tuple_count_sd / (sample_size - 1));
+	tuple_len_sd        = sqrt(tuple_len_sd / (sample_size - 1));
+	dead_tuple_count_sd = sqrt(dead_tuple_count_sd / (sample_size - 1));
+	dead_tuple_len_sd   = sqrt(dead_tuple_len_sd / (sample_size - 1));
+	free_space_sd       = sqrt(free_space_sd / (sample_size - 1));
+
+#ifdef NOT_USED
+	elog(NOTICE, "pgstattuple2: SD tuple_count %.2f, tuple_len %.2f, dead_tuple_count %.2f, dead_tuple_len %.2f, free_space %.2f", 
+		 tuple_count_sd,
+		 tuple_len_sd,
+		 dead_tuple_count_sd,
+		 dead_tuple_len_sd,
+		 free_space_sd);
+#endif
+
+	/*
+	 * standard error
+	 */
+	{
+		double tmp = ((double)nblocks - (double)sample_size) / (double)nblocks;
+
+		tuple_count_se      = tmp * tuple_count_sd / sqrt(nblocks);
+		tuple_len_se        = tmp * tuple_len_sd / sqrt(nblocks);
+		dead_tuple_count_se = tmp * dead_tuple_count_sd / sqrt(nblocks);
+		dead_tuple_len_se   = tmp * dead_tuple_len_sd / sqrt(nblocks);
+		free_space_se       = tmp * free_space_sd / sqrt(nblocks);
+	}
+
+	elog(NOTICE, "pgstattuple2: SE tuple_count %.2f, tuple_len %.2f, dead_tuple_count %.2f, dead_tuple_len %.2f, free_space %.2f", 
+		 tuple_count_se * nblocks,
+		 tuple_len_se * nblocks,
+		 dead_tuple_count_se * nblocks,
+		 dead_tuple_len_se * nblocks,
+		 free_space_se * nblocks);
+
+	*tuple_count      = tuple_count_avg * nblocks;
+	*tuple_len        = tuple_len_avg * nblocks;
+	*dead_tuple_count = dead_tuple_count_avg * nblocks;
+	*dead_tuple_len   = dead_tuple_len_avg * nblocks;
+	*free_space       = free_space_avg * nblocks;
+}
+
+/*
+ * pgstat_heap_sample -- returns live/dead tuples info in a heap
+ */
+static Datum
+pgstat_heap_sample(Relation rel, FunctionCallInfo fcinfo)
+{
+	BlockNumber nblocks;
+	BlockNumber block;
+	pgstattuple_type stat = {0};
+	pgstattuple_block_stats block_stats[SAMPLE_SIZE];
+	int i;
+
+	nblocks = RelationGetNumberOfBlocks(rel);
+
+	for (i=0 ; i<SAMPLE_SIZE ; i++)
+	{
+		Buffer		buffer;
+		Page		page;
+		OffsetNumber pageoff;
+
+		/*
+		 * sample random blocks
+		 */
+		block = (double)random() / RAND_MAX * nblocks;
+
+		CHECK_FOR_INTERRUPTS();
+
+		/* Read and lock buffer */
+		buffer = ReadBuffer(rel, block);
+		LockBuffer(buffer, BUFFER_LOCK_SHARE);
+		page = BufferGetPage(buffer);
+
+		/* get block stats of the sample block */
+		block_stats[i].tuple_count      = 0;
+		block_stats[i].tuple_len        = 0;
+		block_stats[i].dead_tuple_count = 0;
+		block_stats[i].dead_tuple_len   = 0;
+		block_stats[i].free_space       = 0;
+
+		block_stats[i].free_space = PageGetFreeSpace(page);
+
+		for (pageoff = FirstOffsetNumber; pageoff <= PageGetMaxOffsetNumber(page); pageoff = OffsetNumberNext(pageoff))
+		{
+			ItemId		lp = PageGetItemId(page, pageoff);
+			HeapTupleData tup;
+
+			memset(&tup, 0, sizeof(HeapTupleData));
+
+			tup.t_data     = (HeapTupleHeader)PageGetItem(page, lp);
+			tup.t_len      = ItemIdGetLength(lp);
+			tup.t_tableOid = RelationGetRelid(rel);
+			ItemPointerSet(&(tup.t_self), BufferGetBlockNumber(buffer), pageoff);
+
+			if (ItemIdIsNormal(lp))
+			{
+				if (HeapTupleSatisfiesVisibility(&tup, SnapshotNow, buffer))
+				{
+					block_stats[i].tuple_count++;
+					block_stats[i].tuple_len += tup.t_len;
+				}
+				else
+				{
+					block_stats[i].dead_tuple_count++;
+					block_stats[i].dead_tuple_len += tup.t_len;
+				}
+			}
+		}
+		
+		LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+		ReleaseBuffer(buffer);
+	}
+
+	relation_close(rel, AccessShareLock);
+
+	compute_parameters(block_stats, SAMPLE_SIZE, nblocks,
+					   &stat.tuple_count,
+					   &stat.tuple_len,
+					   &stat.dead_tuple_count,
+					   &stat.dead_tuple_len,
+					   &stat.free_space);
+
+	stat.table_len = (uint64) nblocks *BLCKSZ;
+
+	return build_pgstattuple_type(&stat, fcinfo);
+}
+
+Datum
+pgstattuple2(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	Relation	rel;
+
+	if (!superuser())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 (errmsg("must be superuser to use pgstattuple functions"))));
+
+	/* open relation */
+	rel = relation_open(relid, AccessShareLock);
+
+	PG_RETURN_DATUM(pgstat_relation(rel, fcinfo, true));
 }
