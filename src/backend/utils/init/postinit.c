@@ -111,7 +111,7 @@ GetDatabaseTuple(const char *dbname)
 	relation = heap_open(DatabaseRelationId, AccessShareLock);
 	scan = systable_beginscan(relation, DatabaseNameIndexId,
 							  criticalSharedRelcachesBuilt,
-							  SnapshotNow,
+							  NULL,
 							  1, key);
 
 	tuple = systable_getnext(scan);
@@ -154,7 +154,7 @@ GetDatabaseTupleByOid(Oid dboid)
 	relation = heap_open(DatabaseRelationId, AccessShareLock);
 	scan = systable_beginscan(relation, DatabaseOidIndexId,
 							  criticalSharedRelcachesBuilt,
-							  SnapshotNow,
+							  NULL,
 							  1, key);
 
 	tuple = systable_getnext(scan);
@@ -356,11 +356,6 @@ CheckMyDatabase(const char *name, bool am_superuser)
 	/* Make the locale settings visible as GUC variables, too */
 	SetConfigOption("lc_collate", collate, PGC_INTERNAL, PGC_S_OVERRIDE);
 	SetConfigOption("lc_ctype", ctype, PGC_INTERNAL, PGC_S_OVERRIDE);
-
-	/* Use the right encoding in translated messages */
-#ifdef ENABLE_NLS
-	pg_bind_textdomain_codeset(textdomain(NULL));
-#endif
 
 	ReleaseSysCache(tup);
 }
@@ -1002,18 +997,23 @@ static void
 process_settings(Oid databaseid, Oid roleid)
 {
 	Relation	relsetting;
+	Snapshot	snapshot;
 
 	if (!IsUnderPostmaster)
 		return;
 
 	relsetting = heap_open(DbRoleSettingRelationId, AccessShareLock);
 
-	/* Later settings are ignored if set earlier. */
-	ApplySetting(databaseid, roleid, relsetting, PGC_S_DATABASE_USER);
-	ApplySetting(InvalidOid, roleid, relsetting, PGC_S_USER);
-	ApplySetting(databaseid, InvalidOid, relsetting, PGC_S_DATABASE);
-	ApplySetting(InvalidOid, InvalidOid, relsetting, PGC_S_GLOBAL);
+	/* read all the settings under the same snapsot for efficiency */
+	snapshot = RegisterSnapshot(GetCatalogSnapshot(DbRoleSettingRelationId));
 
+	/* Later settings are ignored if set earlier. */
+	ApplySetting(snapshot, databaseid, roleid, relsetting, PGC_S_DATABASE_USER);
+	ApplySetting(snapshot, InvalidOid, roleid, relsetting, PGC_S_USER);
+	ApplySetting(snapshot, databaseid, InvalidOid, relsetting, PGC_S_DATABASE);
+	ApplySetting(snapshot, InvalidOid, InvalidOid, relsetting, PGC_S_GLOBAL);
+
+	UnregisterSnapshot(snapshot);
 	heap_close(relsetting, AccessShareLock);
 }
 
@@ -1083,7 +1083,7 @@ ThereIsAtLeastOneRole(void)
 
 	pg_authid_rel = heap_open(AuthIdRelationId, AccessShareLock);
 
-	scan = heap_beginscan(pg_authid_rel, SnapshotNow, 0, NULL);
+	scan = heap_beginscan_catalog(pg_authid_rel, 0, NULL);
 	result = (heap_getnext(scan, ForwardScanDirection) != NULL);
 
 	heap_endscan(scan);
