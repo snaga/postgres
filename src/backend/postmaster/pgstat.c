@@ -31,6 +31,10 @@
 
 #include "pgstat.h"
 
+#ifdef PGSTAT_USE_DBM
+#include <gdbm.h>
+#endif /*  PGSTAT_USE_DBM */
+
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/transam.h"
@@ -71,6 +75,9 @@
 #define PGSTAT_STAT_PERMANENT_DIRECTORY		"pg_stat"
 #define PGSTAT_STAT_PERMANENT_FILENAME		"pg_stat/global.stat"
 #define PGSTAT_STAT_PERMANENT_TMPFILE		"pg_stat/global.tmp"
+#ifdef PGSTAT_USE_DBM
+#define PGSTAT_STAT_PERMANENT_DBNAME		"pg_stat/global.stat.db"
+#endif /* PGSTAT_USE_DBM */
 
 /* ----------
  * Timer definitions.
@@ -299,6 +306,137 @@ static void pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict *msg, int le
 static void pgstat_recv_deadlock(PgStat_MsgDeadlock *msg, int len);
 static void pgstat_recv_tempfile(PgStat_MsgTempFile *msg, int len);
 
+#ifdef PGSTAT_USE_DBM
+
+static GDBM_FILE
+pgstat_dbm_open()
+{
+	GDBM_FILE db;
+
+	db = gdbm_open(PGSTAT_STAT_PERMANENT_DBNAME, 512, GDBM_WRCREAT|GDBM_NOLOCK, S_IRUSR|S_IWUSR, NULL);
+	if (db == NULL)
+	{
+		elog(LOG, "pgstat_dbm_open: can't open %s. %s", PGSTAT_STAT_PERMANENT_DBNAME,
+			 gdbm_strerror(errno));
+	}
+
+	return db;
+}
+
+static void
+pgstat_dbm_put(GDBM_FILE db, Oid oid, const char type, const char *data, size_t datalen, uint8 *flags)
+{
+	datum key, value;
+	char *buf;
+
+	if ( (*flags & PGSTAT_FLAG_UPDATED)==0 )
+	{
+		elog(LOG, "pgstat_dbm_put: oid=%d, type=%c not updated. skipping.", oid, type);
+		return;
+	}
+
+	*flags &= ~PGSTAT_FLAG_UPDATED;
+
+	buf = palloc(datalen + 1);
+	buf[0] = type;
+	memcpy(buf+1, data, datalen);
+
+	if (oid == OID_MAX)
+	{
+		key.dptr  = "global";
+		key.dsize = strlen("global");
+	}
+	else
+	{
+		key.dptr  = (char *)&oid;
+		key.dsize = sizeof(Oid);
+	}
+
+	value.dptr  = buf;
+	value.dsize = datalen + 1;
+	
+	elog(LOG, "pgstat_dbm_put: key = { %p, %d }, val = { %p, %d }", key.dptr, key.dsize, value.dptr, value.dsize);
+
+	gdbm_store(db, key, value, GDBM_REPLACE);
+
+	elog(LOG, "pgstat_dbm_put: oid=%d, type=%c, size=%d", oid, type, (int)datalen);
+}
+
+static void
+pgstat_dbm_get(GDBM_FILE db, Oid oid, char *type, char *buf, size_t buflen)
+{
+	datum key, value;
+
+	if (oid == OID_MAX)
+	{
+		key.dptr  = "global";
+		key.dsize = strlen("global");
+	}
+	else
+	{
+		key.dptr  = (char *)&oid;
+		key.dsize = sizeof(Oid);
+	}
+
+	elog(LOG, "pgstat_dbm_get: db=%p", db);
+
+	value = gdbm_fetch(db, key);
+
+	elog(LOG, "pgstat_dbm_get: key = { %p, %d }, val = { %p, %d }", key.dptr, key.dsize, value.dptr, value.dsize);
+
+	if (value.dptr == NULL)
+	{
+		elog(LOG, "pgstat_dbm_get: key=%d not found.", oid);
+		return;
+	}
+
+	*type = value.dptr[0];
+
+	/* FIXME: value.dsize and buflen must have the same value. */
+	memcpy(buf, value.dptr+1, buflen);
+
+	elog(LOG, "pgstat_dbm_get: oid=%d, type=%c, size=%d", oid, *type, (int)buflen);
+}
+
+static void
+pgstat_dbm_delete(GDBM_FILE db, Oid oid)
+{
+	datum key;
+	int rc;
+		
+	if (oid == OID_MAX)
+	{
+		key.dptr  = "global";
+		key.dsize = strlen("global");
+	}
+	else
+	{
+		key.dptr  = (char *)&oid;
+		key.dsize = sizeof(Oid);
+	}
+
+//	rc = dbm_delete(statdb, key);
+	rc = gdbm_delete(db, key);
+
+	elog(LOG, "pgstat_dbm_delete: oid=%d", oid);
+}
+
+static void
+pgstat_dbm_sync(GDBM_FILE db)
+{
+	gdbm_sync(db);
+	elog(LOG, "pgstat_dbm_sync: synced");
+}
+
+static void
+pgstat_dbm_close(GDBM_FILE db)
+{
+	gdbm_close(db);
+	elog(LOG, "pgstat_dbm_closed: closed");
+}
+
+#endif /* PGSTAT_USE_DBM */
+
 /* ------------------------------------------------------------
  * Public functions called from postmaster follow
  * ------------------------------------------------------------
@@ -428,6 +566,17 @@ pgstat_init(void)
 		 * rules prevent it).
 		 */
 		test_byte = TESTBYTEVAL;
+
+#ifdef PGSTAT_USE_DBM
+		if (!pgstat_dbm_open())
+		{
+			ereport(LOG,
+					(errcode_for_file_access(),
+					 errmsg("could not open statistics db \"%s\": %m",
+							PGSTAT_STAT_PERMANENT_DBNAME)));
+			return;
+		}
+#endif /* PGSTAT_USE_DBM */
 
 retry1:
 		if (send(pgStatSock, &test_byte, 1, 0) != 1)
@@ -3394,6 +3543,8 @@ reset_dbentry_counters(PgStat_StatDBEntry *dbentry)
 	dbentry->stat_reset_timestamp = GetCurrentTimestamp();
 	dbentry->stats_timestamp = 0;
 
+	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+
 	memset(&hash_ctl, 0, sizeof(hash_ctl));
 	hash_ctl.keysize = sizeof(Oid);
 	hash_ctl.entrysize = sizeof(PgStat_StatTabEntry);
@@ -3486,6 +3637,8 @@ pgstat_get_tab_entry(PgStat_StatDBEntry *dbentry, Oid tableoid, bool create)
 		result->analyze_count = 0;
 		result->autovac_analyze_timestamp = 0;
 		result->autovac_analyze_count = 0;
+
+		result->flags |= PGSTAT_FLAG_UPDATED;
 	}
 
 	return result;
@@ -3516,12 +3669,16 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	const char *tmpfile = permanent ? PGSTAT_STAT_PERMANENT_TMPFILE : pgstat_stat_tmpname;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
 	int			rc;
+#ifdef PGSTAT_USE_DBM
+	GDBM_FILE dbw;
+#endif /* PGSTAT_USE_DBM */
 
 	elog(DEBUG2, "writing statsfile '%s'", statfile);
 
 	/*
 	 * Open the statistics temp file to write out the current values.
 	 */
+	/* FIXME: needs to be fixed. */
 	fpout = AllocateFile(tmpfile, PG_BINARY_W);
 	if (fpout == NULL)
 	{
@@ -3532,6 +3689,10 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 		return;
 	}
 
+#ifdef PGSTAT_USE_DBM
+	dbw = pgstat_dbm_open();
+#endif /* PGSTAT_USE_DBM */
+
 	/*
 	 * Set the timestamp of the stats file.
 	 */
@@ -3541,14 +3702,19 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	 * Write the file header --- currently just a format ID.
 	 */
 	format_id = PGSTAT_FILE_FORMAT_ID;
+	/* FIXME: needs to be fixed. */
 	rc = fwrite(&format_id, sizeof(format_id), 1, fpout);
 	(void) rc;					/* we'll check for error with ferror */
 
 	/*
 	 * Write global stats struct
 	 */
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_put(dbw, OID_MAX, 'G', (char *)&globalStats, sizeof(globalStats), &globalStats.flags);
+#else
 	rc = fwrite(&globalStats, sizeof(globalStats), 1, fpout);
 	(void) rc;					/* we'll check for error with ferror */
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Walk through the database table.
@@ -3573,10 +3739,21 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 		 * Write out the DB entry. We don't write the tables or functions
 		 * pointers, since they're of no use to any other process.
 		 */
+		/* FIXME: needs to be fixed. */
 		fputc('D', fpout);
 		rc = fwrite(dbentry, offsetof(PgStat_StatDBEntry, tables), 1, fpout);
 		(void) rc;				/* we'll check for error with ferror */
+
+#ifdef PGSTAT_USE_DBM
+		pgstat_dbm_put(dbw, dbentry->databaseid, 'D', (char *)dbentry, sizeof(PgStat_StatDBEntry), &dbentry->flags);
+#endif /* PGSTAT_USE_DBM */
 	}
+
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_sync(dbw);
+	pgstat_dbm_close(dbw);
+#endif /* PGSTAT_USE_DBM */
+	/* FIXME: close here? */
 
 	/*
 	 * No more output to be done. Close the temp file and replace the old
@@ -3591,9 +3768,11 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 				(errcode_for_file_access(),
 			   errmsg("could not write temporary statistics file \"%s\": %m",
 					  tmpfile)));
+		/* FIXME: needs to be fixed. */
 		FreeFile(fpout);
 		unlink(tmpfile);
 	}
+	/* FIXME: needs to be fixed. */
 	else if (FreeFile(fpout) < 0)
 	{
 		ereport(LOG,
@@ -3693,6 +3872,7 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	/*
 	 * Open the statistics temp file to write out the current values.
 	 */
+	/* FIXME: needs to be fixed. */
 	fpout = AllocateFile(tmpfile, PG_BINARY_W);
 	if (fpout == NULL)
 	{
@@ -3707,6 +3887,7 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	 * Write the file header --- currently just a format ID.
 	 */
 	format_id = PGSTAT_FILE_FORMAT_ID;
+	/* FIXME: needs to be fixed. */
 	rc = fwrite(&format_id, sizeof(format_id), 1, fpout);
 	(void) rc;					/* we'll check for error with ferror */
 
@@ -3716,9 +3897,14 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	hash_seq_init(&tstat, dbentry->tables);
 	while ((tabentry = (PgStat_StatTabEntry *) hash_seq_search(&tstat)) != NULL)
 	{
+		/* FIXME: needs to be fixed. */
 		fputc('T', fpout);
 		rc = fwrite(tabentry, sizeof(PgStat_StatTabEntry), 1, fpout);
 		(void) rc;				/* we'll check for error with ferror */
+
+#ifdef PGSTAT_USE_DBM
+//		pgstat_dbm_put(tabentry->tableid, 'T', tabentry, sizeof(PgStat_StatTabEntry), &tabentry->flags);
+#endif /* PGSTAT_USE_DBM */
 	}
 
 	/*
@@ -3727,9 +3913,14 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	hash_seq_init(&fstat, dbentry->functions);
 	while ((funcentry = (PgStat_StatFuncEntry *) hash_seq_search(&fstat)) != NULL)
 	{
+		/* FIXME: needs to be fixed. */
 		fputc('F', fpout);
 		rc = fwrite(funcentry, sizeof(PgStat_StatFuncEntry), 1, fpout);
 		(void) rc;				/* we'll check for error with ferror */
+
+#ifdef PGSTAT_USE_DBM
+//		pgstat_dbm_put(funcentry->functionid, 'F', funcentry, sizeof(PgStat_StatFuncEntry), &funcentry->flags);
+#endif /* PGSTAT_USE_DBM */
 	}
 
 	/*
@@ -3745,9 +3936,11 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 				(errcode_for_file_access(),
 			   errmsg("could not write temporary statistics file \"%s\": %m",
 					  tmpfile)));
+		/* FIXME: needs to be fixed. */
 		FreeFile(fpout);
 		unlink(tmpfile);
 	}
+	/* FIXME: needs to be fixed. */
 	else if (FreeFile(fpout) < 0)
 	{
 		ereport(LOG,
@@ -3795,9 +3988,13 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	HASHCTL		hash_ctl;
 	HTAB	   *dbhash;
 	FILE	   *fpin;
+#ifdef PGSTAT_USE_DBM
+	GDBM_FILE dbin;
+#endif /* PGSTAT_USE_DBM */
 	int32		format_id;
 	bool		found;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
+	char type;
 
 	/*
 	 * The tables will live in pgStatLocalContext.
@@ -3836,6 +4033,7 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	 * not yet written the stats file the first time.  Any other failure
 	 * condition is suspicious.
 	 */
+	/* FIXME: needs to be fixed. */
 	if ((fpin = AllocateFile(statfile, PG_BINARY_R)) == NULL)
 	{
 		if (errno != ENOENT)
@@ -3845,10 +4043,14 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 							statfile)));
 		return dbhash;
 	}
+#ifdef PGSTAT_USE_DBM
+	dbin = pgstat_dbm_open();
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Verify it's of the expected format.
 	 */
+	/* FIXME: needs to be fixed. */
 	if (fread(&format_id, 1, sizeof(format_id), fpin) != sizeof(format_id) ||
 		format_id != PGSTAT_FILE_FORMAT_ID)
 	{
@@ -3860,12 +4062,16 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	/*
 	 * Read global stats struct
 	 */
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_get(dbin, OID_MAX, &type, (char *)&globalStats, sizeof(globalStats));
+#else
 	if (fread(&globalStats, 1, sizeof(globalStats), fpin) != sizeof(globalStats))
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
 		goto done;
 	}
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * We found an existing collector stats file. Read it and put all the
@@ -3964,7 +4170,12 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	}
 
 done:
+	/* FIXME: needs to be fixed. */
 	FreeFile(fpin);
+
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_close(dbin);
+#endif /* PGSTAT_USE_DBM */
 
 	/* If requested to read the permanent file, also get rid of it. */
 	if (permanent)
@@ -4011,6 +4222,7 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	 * not yet written the stats file the first time.  Any other failure
 	 * condition is suspicious.
 	 */
+	/* FIXME: needs to be fixed. */
 	if ((fpin = AllocateFile(statfile, PG_BINARY_R)) == NULL)
 	{
 		if (errno != ENOENT)
@@ -4024,6 +4236,7 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	/*
 	 * Verify it's of the expected format.
 	 */
+	/* FIXME: needs to be fixed. */
 	if (fread(&format_id, 1, sizeof(format_id), fpin) != sizeof(format_id) ||
 		format_id != PGSTAT_FILE_FORMAT_ID)
 	{
@@ -4078,6 +4291,7 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 				 * 'F'	A PgStat_StatFuncEntry follows.
 				 */
 			case 'F':
+				/* FIXME: needs to be fixed. */
 				if (fread(&funcbuf, 1, sizeof(PgStat_StatFuncEntry),
 						  fpin) != sizeof(PgStat_StatFuncEntry))
 				{
@@ -4123,6 +4337,7 @@ pgstat_read_db_statsfile(Oid databaseid, HTAB *tabhash, HTAB *funchash,
 	}
 
 done:
+	/* FIXME: needs to be fixed. */
 	FreeFile(fpin);
 
 	if (permanent)
@@ -4158,13 +4373,18 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	PgStat_StatDBEntry dbentry;
 	PgStat_GlobalStats myGlobalStats;
 	FILE	   *fpin;
+#ifdef PGSTAT_USE_DBM
+	GDBM_FILE dbin;
+#endif /* PGSTAT_USE_DBM */
 	int32		format_id;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
+	char type;
 
 	/*
 	 * Try to open the stats file.	As above, anything but ENOENT is worthy of
 	 * complaining about.
 	 */
+	/* FIXME: needs to be fixed. */
 	if ((fpin = AllocateFile(statfile, PG_BINARY_R)) == NULL)
 	{
 		if (errno != ENOENT)
@@ -4174,15 +4394,20 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 							statfile)));
 		return false;
 	}
+#ifdef PGSTAT_USE_DBM
+	dbin = pgstat_dbm_open();
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Verify it's of the expected format.
 	 */
+	/* FIXME: needs to be fixed. */
 	if (fread(&format_id, 1, sizeof(format_id), fpin) != sizeof(format_id) ||
 		format_id != PGSTAT_FILE_FORMAT_ID)
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
+		/* FIXME: needs to be fixed. */
 		FreeFile(fpin);
 		return false;
 	}
@@ -4190,14 +4415,19 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	/*
 	 * Read global stats struct
 	 */
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_get(dbin, OID_MAX, &type, (char *)&myGlobalStats, sizeof(myGlobalStats));
+#else
 	if (fread(&myGlobalStats, 1, sizeof(myGlobalStats),
 			  fpin) != sizeof(myGlobalStats))
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
+		/* FIXME: needs to be fixed. */
 		FreeFile(fpin);
 		return false;
 	}
+#endif /* PGSTAT_USE_DBM */
 
 	/* By default, we're going to return the timestamp of the global file. */
 	*ts = myGlobalStats.stats_timestamp;
@@ -4215,6 +4445,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 				 * follows.
 				 */
 			case 'D':
+				/* FIXME: needs to be fixed. */
 				if (fread(&dbentry, 1, offsetof(PgStat_StatDBEntry, tables),
 						  fpin) != offsetof(PgStat_StatDBEntry, tables))
 				{
@@ -4248,7 +4479,11 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	}
 
 done:
+	/* FIXME: needs to be fixed. */
 	FreeFile(fpin);
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_close(dbin);
+#endif /* PGSTAT_USE_DBM */
 	return true;
 }
 
@@ -4520,6 +4755,8 @@ pgstat_recv_tabstat(PgStat_MsgTabstat *msg, int len)
 	dbentry->n_block_read_time += msg->m_block_read_time;
 	dbentry->n_block_write_time += msg->m_block_write_time;
 
+	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+
 	/*
 	 * Process all table entries in the message.
 	 */
@@ -4578,6 +4815,8 @@ pgstat_recv_tabstat(PgStat_MsgTabstat *msg, int len)
 			tabentry->blocks_hit += tabmsg->t_counts.t_blocks_hit;
 		}
 
+		tabentry->flags |= PGSTAT_FLAG_UPDATED;
+
 		/* Clamp n_live_tuples in case of negative delta_live_tuples */
 		tabentry->n_live_tuples = Max(tabentry->n_live_tuples, 0);
 		/* Likewise for n_dead_tuples */
@@ -4608,6 +4847,9 @@ pgstat_recv_tabpurge(PgStat_MsgTabpurge *msg, int len)
 {
 	PgStat_StatDBEntry *dbentry;
 	int			i;
+#ifdef PGSTAT_USE_DBM
+	GDBM_FILE dbw;
+#endif /* PGSTAT_USE_DBM */
 
 	dbentry = pgstat_get_db_entry(msg->m_databaseid, false);
 
@@ -4616,6 +4858,10 @@ pgstat_recv_tabpurge(PgStat_MsgTabpurge *msg, int len)
 	 */
 	if (!dbentry || !dbentry->tables)
 		return;
+
+#ifdef PGSTAT_USE_DBM
+	dbw = pgstat_dbm_open();
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Process all table entries in the message.
@@ -4626,7 +4872,15 @@ pgstat_recv_tabpurge(PgStat_MsgTabpurge *msg, int len)
 		(void) hash_search(dbentry->tables,
 						   (void *) &(msg->m_tableid[i]),
 						   HASH_REMOVE, NULL);
+
+#ifdef PGSTAT_USE_DBM
+		pgstat_dbm_delete(dbw, msg->m_tableid[i]);
+#endif /* PGSTAT_USE_DBM */
 	}
+
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_close(dbw);
+#endif /* PGSTAT_USE_DBM */
 }
 
 
@@ -4641,12 +4895,18 @@ pgstat_recv_dropdb(PgStat_MsgDropdb *msg, int len)
 {
 	Oid			dbid = msg->m_databaseid;
 	PgStat_StatDBEntry *dbentry;
+#ifdef PGSTAT_USE_DBM
+	GDBM_FILE dbw;
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Lookup the database in the hashtable.
 	 */
 	dbentry = pgstat_get_db_entry(dbid, false);
 
+#ifdef PGSTAT_USE_DBM
+	dbw = pgstat_dbm_open();
+#endif /* PGSTAT_USE_DBM */
 	/*
 	 * If found, remove it (along with the db statfile).
 	 */
@@ -4659,17 +4919,35 @@ pgstat_recv_dropdb(PgStat_MsgDropdb *msg, int len)
 		elog(DEBUG2, "removing %s", statfile);
 		unlink(statfile);
 
+#ifdef PGSTAT_USE_DBM
+		pgstat_dbm_delete(dbw, dbid);
+#endif /* PGSTAT_USE_DBM */
+
 		if (dbentry->tables != NULL)
 			hash_destroy(dbentry->tables);
+		/*
+		 * FIXME: need to delete dbm entry for those tables here.
+		 */
 		if (dbentry->functions != NULL)
 			hash_destroy(dbentry->functions);
+		/*
+		 * FIXME: need to delete dbm entry for those functions here.
+		 */
 
 		if (hash_search(pgStatDBHash,
 						(void *) &dbid,
 						HASH_REMOVE, NULL) == NULL)
 			ereport(ERROR,
 					(errmsg("database hash table corrupted during cleanup --- abort")));
+
+#ifdef PGSTAT_USE_DBM
+		pgstat_dbm_delete(dbw, dbid);
+#endif /* PGSTAT_USE_DBM */
 	}
+
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_close(dbw);
+#endif /* PGSTAT_USE_DBM */
 }
 
 
@@ -4698,8 +4976,14 @@ pgstat_recv_resetcounter(PgStat_MsgResetcounter *msg, int len)
 	 */
 	if (dbentry->tables != NULL)
 		hash_destroy(dbentry->tables);
+	/*
+	 * FIXME: need to delete dbm entry for those tables here.
+	 */
 	if (dbentry->functions != NULL)
 		hash_destroy(dbentry->functions);
+	/*
+	 * FIXME: need to delete dbm entry for those functions here.
+	 */
 
 	dbentry->tables = NULL;
 	dbentry->functions = NULL;
@@ -4756,9 +5040,15 @@ pgstat_recv_resetsinglecounter(PgStat_MsgResetsinglecounter *msg, int len)
 	if (msg->m_resettype == RESET_TABLE)
 		(void) hash_search(dbentry->tables, (void *) &(msg->m_objectid),
 						   HASH_REMOVE, NULL);
+	/*
+	 * FIXME: need to delete dbm entry for the table here.
+	 */
 	else if (msg->m_resettype == RESET_FUNCTION)
 		(void) hash_search(dbentry->functions, (void *) &(msg->m_objectid),
 						   HASH_REMOVE, NULL);
+	/*
+	 * FIXME: need to delete dbm entry for the function here.
+	 */
 }
 
 /* ----------
@@ -4778,6 +5068,8 @@ pgstat_recv_autovac(PgStat_MsgAutovacStart *msg, int len)
 	dbentry = pgstat_get_db_entry(msg->m_databaseid, true);
 
 	dbentry->last_autovac_time = msg->m_start_time;
+
+	dbentry->flags |= PGSTAT_FLAG_UPDATED;
 }
 
 /* ----------
@@ -4813,6 +5105,8 @@ pgstat_recv_vacuum(PgStat_MsgVacuum *msg, int len)
 		tabentry->vacuum_timestamp = msg->m_vacuumtime;
 		tabentry->vacuum_count++;
 	}
+
+	tabentry->flags |= PGSTAT_FLAG_UPDATED;
 }
 
 /* ----------
@@ -4853,6 +5147,8 @@ pgstat_recv_analyze(PgStat_MsgAnalyze *msg, int len)
 		tabentry->analyze_timestamp = msg->m_analyzetime;
 		tabentry->analyze_count++;
 	}
+
+	tabentry->flags |= PGSTAT_FLAG_UPDATED;
 }
 
 
@@ -4875,6 +5171,8 @@ pgstat_recv_bgwriter(PgStat_MsgBgWriter *msg, int len)
 	globalStats.buf_written_backend += msg->m_buf_written_backend;
 	globalStats.buf_fsync_backend += msg->m_buf_fsync_backend;
 	globalStats.buf_alloc += msg->m_buf_alloc;
+
+	globalStats.flags |= PGSTAT_FLAG_UPDATED;
 }
 
 /* ----------
@@ -4915,6 +5213,8 @@ pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict *msg, int len)
 			dbentry->n_conflict_startup_deadlock++;
 			break;
 	}
+
+	dbentry->flags |= PGSTAT_FLAG_UPDATED;
 }
 
 /* ----------
@@ -4931,6 +5231,8 @@ pgstat_recv_deadlock(PgStat_MsgDeadlock *msg, int len)
 	dbentry = pgstat_get_db_entry(msg->m_databaseid, true);
 
 	dbentry->n_deadlocks++;
+
+	dbentry->flags |= PGSTAT_FLAG_UPDATED;
 }
 
 /* ----------
@@ -4948,6 +5250,8 @@ pgstat_recv_tempfile(PgStat_MsgTempFile *msg, int len)
 
 	dbentry->n_temp_bytes += msg->m_filesize;
 	dbentry->n_temp_files += 1;
+
+	dbentry->flags |= PGSTAT_FLAG_UPDATED;
 }
 
 /* ----------
@@ -4995,6 +5299,8 @@ pgstat_recv_funcstat(PgStat_MsgFuncstat *msg, int len)
 			funcentry->f_total_time += funcmsg->f_total_time;
 			funcentry->f_self_time += funcmsg->f_self_time;
 		}
+
+		funcentry->flags |= PGSTAT_FLAG_UPDATED;
 	}
 }
 
@@ -5027,6 +5333,9 @@ pgstat_recv_funcpurge(PgStat_MsgFuncpurge *msg, int len)
 		(void) hash_search(dbentry->functions,
 						   (void *) &(msg->m_functionid[i]),
 						   HASH_REMOVE, NULL);
+		/*
+		 * FIXME: delete thefunction counters here.
+		 */
 	}
 }
 

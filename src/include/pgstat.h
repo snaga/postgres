@@ -18,6 +18,7 @@
 #include "utils/hsearch.h"
 #include "utils/relcache.h"
 
+#define PGSTAT_USE_DBM 1
 
 /* Values for track_functions GUC variable --- order is significant! */
 typedef enum TrackFunctionsLevel
@@ -517,6 +518,10 @@ typedef union PgStat_Msg
 
 #define PGSTAT_FILE_FORMAT_ID	0x01A5BC9B
 
+#ifdef PGSTAT_USE_DBM
+#define PGSTAT_FLAG_UPDATED (0x1)
+#endif /* PGSTAT_USE_DBM */
+
 /* ----------
  * PgStat_StatDBEntry			The collector's data per database
  * ----------
@@ -547,6 +552,10 @@ typedef struct PgStat_StatDBEntry
 
 	TimestampTz stat_reset_timestamp;
 	TimestampTz stats_timestamp;	/* time of db stats file update */
+
+#ifdef PGSTAT_USE_DBM
+	uint8 flags;
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * tables and functions must be last in the struct, because we don't write
@@ -590,6 +599,10 @@ typedef struct PgStat_StatTabEntry
 	PgStat_Counter analyze_count;
 	TimestampTz autovac_analyze_timestamp;		/* autovacuum initiated */
 	PgStat_Counter autovac_analyze_count;
+
+#ifdef PGSTAT_USE_DBM
+	uint8 flags;
+#endif /* PGSTAT_USE_DBM */
 } PgStat_StatTabEntry;
 
 
@@ -605,6 +618,10 @@ typedef struct PgStat_StatFuncEntry
 
 	PgStat_Counter f_total_time;	/* times in microseconds */
 	PgStat_Counter f_self_time;
+
+#ifdef PGSTAT_USE_DBM
+	uint8 flags;
+#endif /* PGSTAT_USE_DBM */
 } PgStat_StatFuncEntry;
 
 
@@ -625,6 +642,10 @@ typedef struct PgStat_GlobalStats
 	PgStat_Counter buf_fsync_backend;
 	PgStat_Counter buf_alloc;
 	TimestampTz stat_reset_timestamp;
+
+#ifdef PGSTAT_USE_DBM
+	uint8 flags;
+#endif /* PGSTAT_USE_DBM */
 } PgStat_GlobalStats;
 
 
