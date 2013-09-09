@@ -1,13 +1,15 @@
 /*
  * statdump
  */
+#include "postgres.h"
+
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
 #include <gdbm.h>
 
-#include "libpq-fe.h"
+#include "pgstat.h"
 
 int
 main(int argc, char *argv[])
