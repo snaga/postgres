@@ -3651,7 +3651,9 @@ pgstat_get_tab_entry(PgStat_StatDBEntry *dbentry, Oid tableoid, bool create)
 		result->autovac_analyze_timestamp = 0;
 		result->autovac_analyze_count = 0;
 
+#ifdef PGSTAT_USE_DBM
 		result->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 	}
 
 	return result;
@@ -4021,7 +4023,9 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	int32		format_id;
 	bool		found;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
+#ifdef PGSTAT_USE_DBM
 	char type;
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * The tables will live in pgStatLocalContext.
@@ -4408,7 +4412,9 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 #endif /* PGSTAT_USE_DBM */
 	int32		format_id;
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
+#ifdef PGSTAT_USE_DBM
 	char type;
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Try to open the stats file.	As above, anything but ENOENT is worthy of
@@ -4785,7 +4791,9 @@ pgstat_recv_tabstat(PgStat_MsgTabstat *msg, int len)
 	dbentry->n_block_read_time += msg->m_block_read_time;
 	dbentry->n_block_write_time += msg->m_block_write_time;
 
+#ifdef PGSTAT_USE_DBM
 	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Process all table entries in the message.
@@ -4845,7 +4853,9 @@ pgstat_recv_tabstat(PgStat_MsgTabstat *msg, int len)
 			tabentry->blocks_hit += tabmsg->t_counts.t_blocks_hit;
 		}
 
+#ifdef PGSTAT_USE_DBM
 		tabentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 
 		/* Clamp n_live_tuples in case of negative delta_live_tuples */
 		tabentry->n_live_tuples = Max(tabentry->n_live_tuples, 0);
@@ -5102,7 +5112,9 @@ pgstat_recv_autovac(PgStat_MsgAutovacStart *msg, int len)
 
 	dbentry->last_autovac_time = msg->m_start_time;
 
+#ifdef PGSTAT_USE_DBM
 	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 }
 
 /* ----------
@@ -5139,7 +5151,9 @@ pgstat_recv_vacuum(PgStat_MsgVacuum *msg, int len)
 		tabentry->vacuum_count++;
 	}
 
+#ifdef PGSTAT_USE_DBM
 	tabentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 }
 
 /* ----------
@@ -5181,7 +5195,9 @@ pgstat_recv_analyze(PgStat_MsgAnalyze *msg, int len)
 		tabentry->analyze_count++;
 	}
 
+#ifdef PGSTAT_USE_DBM
 	tabentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 }
 
 
@@ -5249,7 +5265,9 @@ pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict *msg, int len)
 			break;
 	}
 
+#ifdef PGSTAT_USE_DBM
 	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 }
 
 /* ----------
@@ -5267,7 +5285,9 @@ pgstat_recv_deadlock(PgStat_MsgDeadlock *msg, int len)
 
 	dbentry->n_deadlocks++;
 
+#ifdef PGSTAT_USE_DBM
 	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 }
 
 /* ----------
@@ -5286,7 +5306,9 @@ pgstat_recv_tempfile(PgStat_MsgTempFile *msg, int len)
 	dbentry->n_temp_bytes += msg->m_filesize;
 	dbentry->n_temp_files += 1;
 
+#ifdef PGSTAT_USE_DBM
 	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 }
 
 /* ----------
@@ -5335,7 +5357,9 @@ pgstat_recv_funcstat(PgStat_MsgFuncstat *msg, int len)
 			funcentry->f_self_time += funcmsg->f_self_time;
 		}
 
+#ifdef PGSTAT_USE_DBM
 		funcentry->flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 	}
 }
 
