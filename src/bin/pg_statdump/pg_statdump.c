@@ -55,6 +55,8 @@ main(int argc, char *argv[])
 	datum key, value;
 	PgStat_GlobalStats globalStats;
 	PgStat_StatDBEntry statDBEntry;
+	PgStat_StatTabEntry statTabEntry;
+	PgStat_StatFuncEntry statFuncEntry;
 	
 	if ( argv[1] == NULL )
     {
@@ -75,6 +77,10 @@ main(int argc, char *argv[])
 		Oid oid;
 		
 		value = gdbm_fetch(db, key);
+		if (value.dptr == NULL)
+		{
+			continue;
+		}
 		
 		memcpy(&oid, key.dptr, key.dsize);
 //		printf("oid=%d, type=%c, size=%d\n", oid, value.dptr[0], value.dsize-1);
@@ -124,6 +130,43 @@ main(int argc, char *argv[])
 			printf("%ld,", statDBEntry.n_block_write_time);
 			printf("\"%s\",", timestamptz_to_cstring(statDBEntry.stat_reset_timestamp));
 			printf("\"%s\"", timestamptz_to_cstring(statDBEntry.stats_timestamp));
+			printf(" }\n");
+		}
+		if (value.dptr[0]== 'T')
+		{
+			memcpy(&statTabEntry, value.dptr+1, value.dsize-1);
+			printf("PgStat_StatTabEntry : { ");
+			printf("%d,", statTabEntry.tableid);
+			printf("%ld,", statTabEntry.numscans);
+			printf("%ld,", statTabEntry.tuples_returned);
+			printf("%ld,", statTabEntry.tuples_fetched);
+			printf("%ld,", statTabEntry.tuples_inserted);
+			printf("%ld,", statTabEntry.tuples_updated);
+			printf("%ld,", statTabEntry.tuples_deleted);
+			printf("%ld,", statTabEntry.tuples_hot_updated);
+			printf("%ld,", statTabEntry.n_live_tuples);
+			printf("%ld,", statTabEntry.n_dead_tuples);
+			printf("%ld,", statTabEntry.changes_since_analyze);
+			printf("%ld,", statTabEntry.blocks_fetched);
+			printf("%ld,", statTabEntry.blocks_hit);
+			printf("\"%s\",", timestamptz_to_cstring(statTabEntry.vacuum_timestamp));
+			printf("%ld,", statTabEntry.vacuum_count);
+			printf("\"%s\",", timestamptz_to_cstring(statTabEntry.autovac_vacuum_timestamp));
+			printf("%ld,", statTabEntry.autovac_vacuum_count);
+			printf("\"%s\",", timestamptz_to_cstring(statTabEntry.analyze_timestamp));
+			printf("%ld,", statTabEntry.analyze_count);
+			printf("\"%s\",", timestamptz_to_cstring(statTabEntry.autovac_analyze_timestamp));
+			printf("%ld", statTabEntry.autovac_analyze_count);
+			printf(" }\n");
+		}
+		if (value.dptr[0]== 'F')
+		{
+			memcpy(&statFuncEntry, value.dptr+1, value.dsize-1);
+			printf("PgStat_StatFuncEntry : { ");
+			printf("%d,", statFuncEntry.functionid);
+			printf("%ld,", statFuncEntry.f_numcalls);
+			printf("%ld,", statFuncEntry.f_total_time);
+			printf("%ld", statFuncEntry.f_self_time);
 			printf(" }\n");
 		}
     }

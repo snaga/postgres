@@ -3519,6 +3519,12 @@ reset_dbentry_counters(PgStat_StatDBEntry *dbentry)
 {
 	HASHCTL		hash_ctl;
 
+#ifdef PGSTAT_USE_DBM
+	GDBM_FILE dbw;
+
+	dbw = pgstat_dbm_open();
+#endif /* PGSTAT_USE_DBM */
+
 	dbentry->n_xact_commit = 0;
 	dbentry->n_xact_rollback = 0;
 	dbentry->n_blocks_fetched = 0;
@@ -3543,7 +3549,10 @@ reset_dbentry_counters(PgStat_StatDBEntry *dbentry)
 	dbentry->stat_reset_timestamp = GetCurrentTimestamp();
 	dbentry->stats_timestamp = 0;
 
+#ifdef PGSTAT_USE_DBM
 	dbentry->flags |= PGSTAT_FLAG_UPDATED;
+	pgstat_dbm_put(dbw, dbentry->databaseid, 'D', (char *)dbentry, sizeof(PgStat_StatDBEntry), &dbentry->flags);
+#endif /* PGSTAT_USE_DBM */
 
 	memset(&hash_ctl, 0, sizeof(hash_ctl));
 	hash_ctl.keysize = sizeof(Oid);
@@ -3561,6 +3570,10 @@ reset_dbentry_counters(PgStat_StatDBEntry *dbentry)
 									 PGSTAT_FUNCTION_HASH_SIZE,
 									 &hash_ctl,
 									 HASH_ELEM | HASH_FUNCTION);
+
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_close(dbw);
+#endif /* PGSTAT_USE_DBM */
 }
 
 /*
@@ -3697,6 +3710,9 @@ pgstat_write_statsfiles(bool permanent, bool allDbs)
 	 * Set the timestamp of the stats file.
 	 */
 	globalStats.stats_timestamp = GetCurrentTimestamp();
+#ifdef PGSTAT_USE_DBM
+	globalStats.flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Write the file header --- currently just a format ID.
@@ -3863,11 +3879,18 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	int			rc;
 	char		tmpfile[MAXPGPATH];
 	char		statfile[MAXPGPATH];
+#ifdef PGSTAT_USE_DBM
+	GDBM_FILE dbw;
+#endif /* PGSTAT_USE_DBM */
 
 	get_dbstat_filename(permanent, true, dbid, tmpfile, MAXPGPATH);
 	get_dbstat_filename(permanent, false, dbid, statfile, MAXPGPATH);
 
 	elog(DEBUG2, "writing statsfile '%s'", statfile);
+
+#ifdef PGSTAT_USE_DBM
+	dbw = pgstat_dbm_open();
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Open the statistics temp file to write out the current values.
@@ -3897,13 +3920,13 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	hash_seq_init(&tstat, dbentry->tables);
 	while ((tabentry = (PgStat_StatTabEntry *) hash_seq_search(&tstat)) != NULL)
 	{
+#ifdef PGSTAT_USE_DBM
+		pgstat_dbm_put(dbw, tabentry->tableid, 'T', (char *)tabentry, sizeof(PgStat_StatTabEntry), &tabentry->flags);
+#else
 		/* FIXME: needs to be fixed. */
 		fputc('T', fpout);
 		rc = fwrite(tabentry, sizeof(PgStat_StatTabEntry), 1, fpout);
 		(void) rc;				/* we'll check for error with ferror */
-
-#ifdef PGSTAT_USE_DBM
-//		pgstat_dbm_put(tabentry->tableid, 'T', tabentry, sizeof(PgStat_StatTabEntry), &tabentry->flags);
 #endif /* PGSTAT_USE_DBM */
 	}
 
@@ -3913,15 +3936,19 @@ pgstat_write_db_statsfile(PgStat_StatDBEntry *dbentry, bool permanent)
 	hash_seq_init(&fstat, dbentry->functions);
 	while ((funcentry = (PgStat_StatFuncEntry *) hash_seq_search(&fstat)) != NULL)
 	{
+#ifdef PGSTAT_USE_DBM
+		pgstat_dbm_put(dbw, funcentry->functionid, 'F', (char *)funcentry, sizeof(PgStat_StatFuncEntry), &funcentry->flags);
+#else
 		/* FIXME: needs to be fixed. */
 		fputc('F', fpout);
 		rc = fwrite(funcentry, sizeof(PgStat_StatFuncEntry), 1, fpout);
 		(void) rc;				/* we'll check for error with ferror */
-
-#ifdef PGSTAT_USE_DBM
-//		pgstat_dbm_put(funcentry->functionid, 'F', funcentry, sizeof(PgStat_StatFuncEntry), &funcentry->flags);
 #endif /* PGSTAT_USE_DBM */
 	}
+
+#ifdef PGSTAT_USE_DBM
+	pgstat_dbm_close(dbw);
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * No more output to be done. Close the temp file and replace the old
@@ -4023,6 +4050,9 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	 * existing statsfile).
 	 */
 	globalStats.stat_reset_timestamp = GetCurrentTimestamp();
+#ifdef PGSTAT_USE_DBM
+	globalStats.flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 
 	/*
 	 * Try to open the stats file. If it doesn't exist, the backends simply
@@ -5009,6 +5039,9 @@ pgstat_recv_resetsharedcounter(PgStat_MsgResetsharedcounter *msg, int len)
 		/* Reset the global background writer statistics for the cluster. */
 		memset(&globalStats, 0, sizeof(globalStats));
 		globalStats.stat_reset_timestamp = GetCurrentTimestamp();
+#ifdef PGSTAT_USE_DBM
+		globalStats.flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 	}
 
 	/*
@@ -5172,7 +5205,9 @@ pgstat_recv_bgwriter(PgStat_MsgBgWriter *msg, int len)
 	globalStats.buf_fsync_backend += msg->m_buf_fsync_backend;
 	globalStats.buf_alloc += msg->m_buf_alloc;
 
+#ifdef PGSTAT_USE_DBM
 	globalStats.flags |= PGSTAT_FLAG_UPDATED;
+#endif /* PGSTAT_USE_DBM */
 }
 
 /* ----------
