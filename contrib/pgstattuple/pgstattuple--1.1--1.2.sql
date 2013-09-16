@@ -37,3 +37,17 @@ CREATE FUNCTION pg_relpages(IN relname regclass)
 RETURNS BIGINT
 AS 'MODULE_PATHNAME', 'pg_relpagesbyid'
 LANGUAGE C STRICT;
+
+CREATE FUNCTION pgstattuple2(IN relname regclass,
+    OUT table_len BIGINT,		-- physical table length in bytes
+    OUT tuple_count BIGINT,		-- number of live tuples
+    OUT tuple_len BIGINT,		-- total tuples length in bytes
+    OUT tuple_percent FLOAT8,		-- live tuples in %
+    OUT dead_tuple_count BIGINT,	-- number of dead tuples
+    OUT dead_tuple_len BIGINT,		-- total dead tuples length in bytes
+    OUT dead_tuple_percent FLOAT8,	-- dead tuples in %
+    OUT free_space BIGINT,		-- free space in bytes
+    OUT free_percent FLOAT8)		-- free space in %
+AS 'MODULE_PATHNAME', 'pgstattuple2'
+LANGUAGE C STRICT;
+
