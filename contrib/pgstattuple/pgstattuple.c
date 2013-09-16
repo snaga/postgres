@@ -727,6 +727,16 @@ pgstat_heap_sample(Relation rel, FunctionCallInfo fcinfo)
 
 			memset(&tup, 0, sizeof(HeapTupleData));
 
+			AssertMacro(PageIsValid(page));
+			if (!ItemIdHasStorage(lp))
+			{
+				/*
+				 * if an itemid doesn't have storage,
+				 * it means the item was already vacuumed.
+				 */
+				continue;
+			}
+
 			tup.t_data     = (HeapTupleHeader)PageGetItem(page, lp);
 			tup.t_len      = ItemIdGetLength(lp);
 			tup.t_tableOid = RelationGetRelid(rel);
@@ -734,7 +744,7 @@ pgstat_heap_sample(Relation rel, FunctionCallInfo fcinfo)
 
 			if (ItemIdIsNormal(lp))
 			{
-				if (HeapTupleSatisfiesVisibility(&tup, SnapshotNow, buffer))
+				if (HeapTupleSatisfiesVisibility(&tup, SnapshotAny, buffer))
 				{
 					block_stats[i].tuple_count++;
 					block_stats[i].tuple_len += tup.t_len;
