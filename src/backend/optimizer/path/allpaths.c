@@ -686,6 +686,9 @@ create_parallel_paths(PlannerInfo *root, RelOptInfo *rel)
 			break;
 	}
 
+	parallel_degree = max_parallel_degree;
+	elog(INFO, "create_parallel_paths: parallel_degree = %d", parallel_degree);
+
 	/* Add an unordered partial path based on a parallel sequential scan. */
 	add_partial_path(rel, create_seqscan_path(root, rel, NULL, parallel_degree));
 
