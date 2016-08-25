@@ -1,0 +1,31 @@
+diff --git a/src/bin/pg_xlogdump/pg_xlogdump.c b/src/bin/pg_xlogdump/pg_xlogdump.c
+index c0a6816..2f1018b 100644
+--- a/src/bin/pg_xlogdump/pg_xlogdump.c
++++ b/src/bin/pg_xlogdump/pg_xlogdump.c
+@@ -901,8 +901,14 @@ main(int argc, char **argv)
+ 			goto bad_argument;
+ 		}
+ 
+-		/* no second file specified, set end position */
+-		if (!(optind + 1 < argc) && XLogRecPtrIsInvalid(private.endptr))
++		/*
++		 * No second file specified, so unless we are in follow mode,
++		 * set the end position to the end of the same segment as
++		 * the start position.
++		 */
++		if (!(optind + 1 < argc) &&
++			XLogRecPtrIsInvalid(private.endptr) &&
++			!config.follow)
+ 			XLogSegNoOffsetToRecPtr(segno + 1, 0, private.endptr);
+ 
+ 		/* parse ENDSEG if passed */
+@@ -933,7 +939,8 @@ main(int argc, char **argv)
+ 		}
+ 
+ 
+-		if (!XLByteInSeg(private.endptr, segno) &&
++		if (!XLogRecPtrIsInvalid(private.endptr) &&
++			!XLByteInSeg(private.endptr, segno) &&
+ 			private.endptr != (segno + 1) * XLogSegSize)
+ 		{
+ 			fprintf(stderr,
