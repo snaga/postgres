@@ -1,0 +1,871 @@
+diff --git a/contrib/postgres_fdw/connection.c b/contrib/postgres_fdw/connection.c
+index 8ca1c1c..954a166 100644
+--- a/contrib/postgres_fdw/connection.c
++++ b/contrib/postgres_fdw/connection.c
+@@ -496,7 +496,7 @@ pgfdw_get_result(PGconn *conn, const char *query)
+ 			wc = WaitLatchOrSocket(MyLatch,
+ 								   WL_LATCH_SET | WL_SOCKET_READABLE,
+ 								   PQsocket(conn),
+-								   -1L);
++								   -1L, EVENT_EXTENSION);
+ 			ResetLatch(MyLatch);
+ 
+ 			CHECK_FOR_INTERRUPTS();
+diff --git a/doc/src/sgml/monitoring.sgml b/doc/src/sgml/monitoring.sgml
+index 0776428..a14abe4 100644
+--- a/doc/src/sgml/monitoring.sgml
++++ b/doc/src/sgml/monitoring.sgml
+@@ -679,6 +679,16 @@ postgres   27093  0.0  0.0  30096  2752 ?        Ss   11:34   0:00 postgres: ser
+           buffer in question.
+          </para>
+         </listitem>
++        <listitem>
++         <para>
++          <literal>EventSet</>: The server process is waiting on a socket
++          or a timer. This wait happens in a latch, an inter-process facility
++          using boolean variables letting a process sleep until it is set.
++          Latches support several type of operations, like postmaster death
++          handling, timeout and socket activity lookup, and are a useful
++          replacement for <function>sleep</> where signal handling matters.
++         </para>
++        </listitem>
+        </itemizedlist>
+       </entry>
+      </row>
+@@ -1085,6 +1095,139 @@ postgres   27093  0.0  0.0  30096  2752 ?        Ss   11:34   0:00 postgres: ser
+          <entry><literal>BufferPin</></entry>
+          <entry>Waiting to acquire a pin on a buffer.</entry>
+         </row>
++        <row>
++         <entry morerows="32"><literal>EventSet</></entry>
++         <entry><literal>ArchiverMain</></entry>
++         <entry>Waiting in main loop of the archiver process.</entry>
++        </row>
++        <row>
++         <entry><literal>AutoVacuumMain</></entry>
++         <entry>Waiting in main loop of autovacuum launcher process.</entry>
++        </row>
++        <row>
++         <entry><literal>BaseBackupThrottle</></entry>
++         <entry>Waiting during base backup when throttling activity.</entry>
++        </row>
++        <row>
++         <entry><literal>BgWorkerStartup</></entry>
++         <entry>Waiting for background worker to start up.</entry>
++        </row>
++        <row>
++         <entry><literal>BgWorkerShutdown</></entry>
++         <entry>Waiting for background worker to shut down.</entry>
++        </row>
++        <row>
++         <entry><literal>BgWriterMain</></entry>
++         <entry>Waiting in main loop of background writer process background worker.</entry>
++        </row>
++        <row>
++         <entry><literal>BgWriterHibernate</></entry>
++         <entry>Waiting in background writer process, hibernating.</entry>
++        </row>
++        <row>
++         <entry><literal>CheckpointerMain</></entry>
++         <entry>Waiting in main loop of checkpointer process.</entry>
++        </row>
++        <row>
++         <entry><literal>ExecuteGather</></entry>
++         <entry>Waiting for activity from child process when executing <literal>Gather</> node.</entry>
++        </row>
++        <row>
++         <entry><literal>Extension</></entry>
++         <entry>Waiting in the code path of an extension, should be used by custom plugins and modules</entry>
++        </row>
++        <row>
++         <entry><literal>MessageQueuePutMessage</></entry>
++         <entry>Waiting to put new message in shared message queue.</entry>
++        </row>
++        <row>
++         <entry><literal>MessageQueueSend</></entry>
++         <entry>Waiting to send bytes in shared message queue.</entry>
++        </row>
++        <row>
++         <entry><literal>MessageQueueReceive</></entry>
++         <entry>Waiting to receive bytes in shared message queue.</entry>
++        </row>
++        <row>
++         <entry><literal>MessageQueueInternal</></entry>
++         <entry>Waiting for other process to be attached in shared message queue.</entry>
++        </row>
++        <row>
++         <entry><literal>ParallelFinish</></entry>
++         <entry>Waiting for parallel workers to finish computing.</entry>
++        </row>
++        <row>
++         <entry><literal>PgSleep</></entry>
++         <entry>Waiting in process that called <function>pg_sleep</>.</entry>
++        </row>
++        <row>
++         <entry><literal>PgStatMain</></entry>
++         <entry>Waiting in main loop of the statistics collector process.</entry>
++        </row>
++        <row>
++         <entry><literal>ProcSleep</></entry>
++         <entry>Waiting for a specific lock.</entry>
++        </row>
++        <row>
++         <entry><literal>ProcSignal</></entry>
++         <entry>Waiting for signal from another backend.</entry>
++        </row>
++        <row>
++         <entry><literal>RecoveryApplyDelay</></entry>
++         <entry>Waiting to apply WAL at recovery because it is delayed.</entry>
++        </row>
++        <row>
++         <entry><literal>RecoveryWalStream</></entry>
++         <entry>Waiting for WAL from a stream at recovery.</entry>
++        </row>
++        <row>
++         <entry><literal>RecoveryWalAll</></entry>
++         <entry>Waiting for WAL from any kind of source (local, archive or stream) at recovery.</entry>
++        </row>
++        <row>
++         <entry><literal>SecureRead</></entry>
++         <entry>Waiting to read data from a secure connection.</entry>
++        </row>
++        <row>
++         <entry><literal>SecureWrite</></entry>
++         <entry>Waiting to write data to a secure connection.</entry>
++        </row>
++        <row>
++         <entry><literal>SSLOpenServer</></entry>
++         <entry>Waiting for SSL while attempting connection.</entry>
++        </row>
++        <row>
++         <entry><literal>SyncRep</></entry>
++         <entry>Waiting for WAL commit during synchronous replication.</entry>
++        </row>
++        <row>
++         <entry><literal>SysLoggerMain</></entry>
++         <entry>Waiting in main loop of syslogger process.</entry>
++        </row>
++        <row>
++         <entry><literal>WalWriterMain</></entry>
++         <entry>Waiting in main loop of WAL writer process.</entry>
++        </row>
++        <row>
++         <entry><literal>WalReceiverWaitStart</></entry>
++         <entry>Waiting for startup process to send initial data for streaming replication.</entry>
++        </row>
++        <row>
++         <entry><literal>WalReceiverMain</></entry>
++         <entry>Waiting in main loop of WAL receiver process.</entry>
++        </row>
++        <row>
++         <entry><literal>WalSenderMain</></entry>
++         <entry>Waiting in main loop of WAL sender process.</entry>
++        </row>
++        <row>
++         <entry><literal>WalSenderWaitForWAL</></entry>
++         <entry>Waiting for WAL to be flushed in WAL sender process.</entry>
++        </row>
++        <row>
++         <entry><literal>WalSenderWriteData</></entry>
++         <entry>Waiting for any activity when processing replies from WAL receiver in WAL sender process.</entry>
++        </row>
+       </tbody>
+      </tgroup>
+     </table>
+diff --git a/src/backend/access/transam/parallel.c b/src/backend/access/transam/parallel.c
+index a47eba6..2495e61 100644
+--- a/src/backend/access/transam/parallel.c
++++ b/src/backend/access/transam/parallel.c
+@@ -541,7 +541,8 @@ WaitForParallelWorkersToFinish(ParallelContext *pcxt)
+ 		if (!anyone_alive)
+ 			break;
+ 
+-		WaitLatch(&MyProc->procLatch, WL_LATCH_SET, -1);
++		WaitLatch(&MyProc->procLatch, WL_LATCH_SET, -1,
++				  EVENT_PARALLEL_WAIT_FINISH);
+ 		ResetLatch(&MyProc->procLatch);
+ 	}
+ 
+diff --git a/src/backend/access/transam/xlog.c b/src/backend/access/transam/xlog.c
+index f13f9c1..19d9977 100644
+--- a/src/backend/access/transam/xlog.c
++++ b/src/backend/access/transam/xlog.c
+@@ -5756,7 +5756,8 @@ recoveryApplyDelay(XLogReaderState *record)
+ 
+ 		WaitLatch(&XLogCtl->recoveryWakeupLatch,
+ 				  WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-				  secs * 1000L + microsecs / 1000);
++				  secs * 1000L + microsecs / 1000,
++				  EVENT_RECOVERY_APPLY_DELAY);
+ 	}
+ 	return true;
+ }
+@@ -11294,7 +11295,7 @@ WaitForWALToBecomeAvailable(XLogRecPtr RecPtr, bool randAccess,
+ 
+ 						WaitLatch(&XLogCtl->recoveryWakeupLatch,
+ 							 WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-								  wait_time);
++							 wait_time, EVENT_RECOVERY_WAL_STREAM);
+ 						ResetLatch(&XLogCtl->recoveryWakeupLatch);
+ 						now = GetCurrentTimestamp();
+ 					}
+@@ -11457,7 +11458,7 @@ WaitForWALToBecomeAvailable(XLogRecPtr RecPtr, bool randAccess,
+ 					 */
+ 					WaitLatch(&XLogCtl->recoveryWakeupLatch,
+ 							  WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-							  5000L);
++							  5000L, EVENT_RECOVERY_WAL_ALL);
+ 					ResetLatch(&XLogCtl->recoveryWakeupLatch);
+ 					break;
+ 				}
+diff --git a/src/backend/executor/nodeGather.c b/src/backend/executor/nodeGather.c
+index 438d1b2..d8fe2a5 100644
+--- a/src/backend/executor/nodeGather.c
++++ b/src/backend/executor/nodeGather.c
+@@ -387,7 +387,7 @@ gather_readnext(GatherState *gatherstate)
+ 				return NULL;
+ 
+ 			/* Nothing to do except wait for developments. */
+-			WaitLatch(MyLatch, WL_LATCH_SET, 0);
++			WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_EXECUTE_GATHER);
+ 			ResetLatch(MyLatch);
+ 			nvisited = 0;
+ 		}
+diff --git a/src/backend/libpq/be-secure-openssl.c b/src/backend/libpq/be-secure-openssl.c
+index f6adb15..759b337 100644
+--- a/src/backend/libpq/be-secure-openssl.c
++++ b/src/backend/libpq/be-secure-openssl.c
+@@ -418,7 +418,8 @@ aloop:
+ 				else
+ 					waitfor = WL_SOCKET_WRITEABLE;
+ 
+-				WaitLatchOrSocket(MyLatch, waitfor, port->sock, 0);
++				WaitLatchOrSocket(MyLatch, waitfor, port->sock, 0,
++								  EVENT_SSL_OPEN_SERVER);
+ 				goto aloop;
+ 			case SSL_ERROR_SYSCALL:
+ 				if (r < 0)
+diff --git a/src/backend/libpq/be-secure.c b/src/backend/libpq/be-secure.c
+index cdd07d5..5880818 100644
+--- a/src/backend/libpq/be-secure.c
++++ b/src/backend/libpq/be-secure.c
+@@ -146,7 +146,8 @@ retry:
+ 
+ 		ModifyWaitEvent(FeBeWaitSet, 0, waitfor, NULL);
+ 
+-		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1);
++		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1,
++						 EVENT_SECURE_READ);
+ 
+ 		/*
+ 		 * If the postmaster has died, it's not safe to continue running,
+@@ -247,7 +248,8 @@ retry:
+ 
+ 		ModifyWaitEvent(FeBeWaitSet, 0, waitfor, NULL);
+ 
+-		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1);
++		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1,
++						 EVENT_SECURE_WRITE);
+ 
+ 		/* See comments in secure_read. */
+ 		if (event.events & WL_POSTMASTER_DEATH)
+diff --git a/src/backend/libpq/pqmq.c b/src/backend/libpq/pqmq.c
+index 921242f..6c39e51 100644
+--- a/src/backend/libpq/pqmq.c
++++ b/src/backend/libpq/pqmq.c
+@@ -171,7 +171,7 @@ mq_putmessage(char msgtype, const char *s, size_t len)
+ 		if (result != SHM_MQ_WOULD_BLOCK)
+ 			break;
+ 
+-		WaitLatch(&MyProc->procLatch, WL_LATCH_SET, 0);
++		WaitLatch(&MyProc->procLatch, WL_LATCH_SET, 0, EVENT_MQ_PUT_MESSAGE);
+ 		ResetLatch(&MyProc->procLatch);
+ 		CHECK_FOR_INTERRUPTS();
+ 	}
+diff --git a/src/backend/postmaster/autovacuum.c b/src/backend/postmaster/autovacuum.c
+index 3768f50..bb80c11 100644
+--- a/src/backend/postmaster/autovacuum.c
++++ b/src/backend/postmaster/autovacuum.c
+@@ -600,7 +600,8 @@ AutoVacLauncherMain(int argc, char *argv[])
+ 		 */
+ 		rc = WaitLatch(MyLatch,
+ 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-					   (nap.tv_sec * 1000L) + (nap.tv_usec / 1000L));
++					   (nap.tv_sec * 1000L) + (nap.tv_usec / 1000L),
++					   EVENT_AUTOVACUUM_MAIN);
+ 
+ 		ResetLatch(MyLatch);
+ 
+diff --git a/src/backend/postmaster/bgworker.c b/src/backend/postmaster/bgworker.c
+index 699c934..ee4ed7e 100644
+--- a/src/backend/postmaster/bgworker.c
++++ b/src/backend/postmaster/bgworker.c
+@@ -969,7 +969,8 @@ WaitForBackgroundWorkerStartup(BackgroundWorkerHandle *handle, pid_t *pidp)
+ 			break;
+ 
+ 		rc = WaitLatch(MyLatch,
+-					   WL_LATCH_SET | WL_POSTMASTER_DEATH, 0);
++					   WL_LATCH_SET | WL_POSTMASTER_DEATH, 0,
++					   EVENT_BGWORKER_STARTUP);
+ 
+ 		if (rc & WL_POSTMASTER_DEATH)
+ 		{
+@@ -1008,7 +1009,8 @@ WaitForBackgroundWorkerShutdown(BackgroundWorkerHandle *handle)
+ 			break;
+ 
+ 		rc = WaitLatch(&MyProc->procLatch,
+-					   WL_LATCH_SET | WL_POSTMASTER_DEATH, 0);
++					   WL_LATCH_SET | WL_POSTMASTER_DEATH, 0,
++					   EVENT_BGWORKER_SHUTDOWN);
+ 
+ 		if (rc & WL_POSTMASTER_DEATH)
+ 		{
+diff --git a/src/backend/postmaster/bgwriter.c b/src/backend/postmaster/bgwriter.c
+index 00f03d8..1c135de 100644
+--- a/src/backend/postmaster/bgwriter.c
++++ b/src/backend/postmaster/bgwriter.c
+@@ -347,7 +347,8 @@ BackgroundWriterMain(void)
+ 		 */
+ 		rc = WaitLatch(MyLatch,
+ 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-					   BgWriterDelay /* ms */ );
++					   BgWriterDelay /* ms */,
++					   EVENT_BGWRITER_MAIN);
+ 
+ 		/*
+ 		 * If no latch event and BgBufferSync says nothing's happening, extend
+@@ -374,7 +375,8 @@ BackgroundWriterMain(void)
+ 			/* Sleep ... */
+ 			rc = WaitLatch(MyLatch,
+ 						   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-						   BgWriterDelay * HIBERNATE_FACTOR);
++						   BgWriterDelay * HIBERNATE_FACTOR,
++						   EVENT_BGWRITER_HIBERNATE);
+ 			/* Reset the notification request in case we timed out */
+ 			StrategyNotifyBgWriter(-1);
+ 		}
+diff --git a/src/backend/postmaster/checkpointer.c b/src/backend/postmaster/checkpointer.c
+index 8d4b353..60bab87 100644
+--- a/src/backend/postmaster/checkpointer.c
++++ b/src/backend/postmaster/checkpointer.c
+@@ -558,7 +558,8 @@ CheckpointerMain(void)
+ 
+ 		rc = WaitLatch(MyLatch,
+ 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-					   cur_timeout * 1000L /* convert to ms */ );
++					   cur_timeout * 1000L /* convert to ms */,
++					   EVENT_CHECKPOINTER_MAIN);
+ 
+ 		/*
+ 		 * Emergency bailout if postmaster has died.  This is to avoid the
+diff --git a/src/backend/postmaster/pgarch.c b/src/backend/postmaster/pgarch.c
+index 1aa6466..156fff7 100644
+--- a/src/backend/postmaster/pgarch.c
++++ b/src/backend/postmaster/pgarch.c
+@@ -390,7 +390,7 @@ pgarch_MainLoop(void)
+ 
+ 				rc = WaitLatch(MyLatch,
+ 							 WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-							   timeout * 1000L);
++							 timeout * 1000L, EVENT_ARCHIVER_MAIN);
+ 				if (rc & WL_TIMEOUT)
+ 					wakened = true;
+ 			}
+diff --git a/src/backend/postmaster/pgstat.c b/src/backend/postmaster/pgstat.c
+index 8fa9edb..08384dc 100644
+--- a/src/backend/postmaster/pgstat.c
++++ b/src/backend/postmaster/pgstat.c
+@@ -3152,6 +3152,9 @@ pgstat_get_wait_event_type(uint32 wait_event_info)
+ 		case WAIT_BUFFER_PIN:
+ 			event_type = "BufferPin";
+ 			break;
++		case WAIT_EVENT_SET:
++			event_type = "EventSet";
++			break;
+ 		default:
+ 			event_type = "???";
+ 			break;
+@@ -3193,6 +3196,9 @@ pgstat_get_wait_event(uint32 wait_event_info)
+ 		case WAIT_BUFFER_PIN:
+ 			event_name = "BufferPin";
+ 			break;
++		case WAIT_EVENT_SET:
++			event_name = GetWaitEventIdentifier(eventId);
++			break;
+ 		default:
+ 			event_name = "unknown wait event";
+ 			break;
+@@ -3682,7 +3688,7 @@ PgstatCollectorMain(int argc, char *argv[])
+ 		wr = WaitLatchOrSocket(MyLatch,
+ 					 WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_SOCKET_READABLE,
+ 							   pgStatSock,
+-							   -1L);
++							   -1L, EVENT_PGSTAT_MAIN);
+ #else
+ 
+ 		/*
+@@ -3698,7 +3704,8 @@ PgstatCollectorMain(int argc, char *argv[])
+ 		wr = WaitLatchOrSocket(MyLatch,
+ 		WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_SOCKET_READABLE | WL_TIMEOUT,
+ 							   pgStatSock,
+-							   2 * 1000L /* msec */ );
++							   2 * 1000L /* msec */,
++							   EVENT_PGSTAT_MAIN);
+ #endif
+ 
+ 		/*
+diff --git a/src/backend/postmaster/syslogger.c b/src/backend/postmaster/syslogger.c
+index e7e488a..c147fd1 100644
+--- a/src/backend/postmaster/syslogger.c
++++ b/src/backend/postmaster/syslogger.c
+@@ -424,7 +424,8 @@ SysLoggerMain(int argc, char *argv[])
+ 		rc = WaitLatchOrSocket(MyLatch,
+ 							   WL_LATCH_SET | WL_SOCKET_READABLE | cur_flags,
+ 							   syslogPipe[0],
+-							   cur_timeout);
++							   cur_timeout,
++							   EVENT_SYSLOGGER_MAIN);
+ 
+ 		if (rc & WL_SOCKET_READABLE)
+ 		{
+@@ -475,7 +476,8 @@ SysLoggerMain(int argc, char *argv[])
+ 
+ 		(void) WaitLatch(MyLatch,
+ 						 WL_LATCH_SET | cur_flags,
+-						 cur_timeout);
++						 cur_timeout,
++						 EVENT_SYSLOGGER_MAIN);
+ 
+ 		EnterCriticalSection(&sysloggerSection);
+ #endif   /* WIN32 */
+diff --git a/src/backend/postmaster/walwriter.c b/src/backend/postmaster/walwriter.c
+index 228190a..781e7b0 100644
+--- a/src/backend/postmaster/walwriter.c
++++ b/src/backend/postmaster/walwriter.c
+@@ -292,7 +292,8 @@ WalWriterMain(void)
+ 
+ 		rc = WaitLatch(MyLatch,
+ 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-					   cur_timeout);
++					   cur_timeout,
++					   EVENT_WALWRITER_MAIN);
+ 
+ 		/*
+ 		 * Emergency bailout if postmaster has died.  This is to avoid the
+diff --git a/src/backend/replication/basebackup.c b/src/backend/replication/basebackup.c
+index da9b7a6..308220f 100644
+--- a/src/backend/replication/basebackup.c
++++ b/src/backend/replication/basebackup.c
+@@ -1286,7 +1286,8 @@ throttle(size_t increment)
+ 		 */
+ 		wait_result = WaitLatch(MyLatch,
+ 							 WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-								(long) (sleep / 1000));
++								(long) (sleep / 1000),
++								EVENT_BASEBACKUP_THROTTLE);
+ 
+ 		if (wait_result & WL_LATCH_SET)
+ 			CHECK_FOR_INTERRUPTS();
+diff --git a/src/backend/replication/syncrep.c b/src/backend/replication/syncrep.c
+index b442d06..2884944 100644
+--- a/src/backend/replication/syncrep.c
++++ b/src/backend/replication/syncrep.c
+@@ -258,7 +258,8 @@ SyncRepWaitForLSN(XLogRecPtr lsn, bool commit)
+ 		 * Wait on latch.  Any condition that should wake us up will set the
+ 		 * latch, so no need for timeout.
+ 		 */
+-		WaitLatch(MyLatch, WL_LATCH_SET | WL_POSTMASTER_DEATH, -1);
++		WaitLatch(MyLatch, WL_LATCH_SET | WL_POSTMASTER_DEATH, -1,
++				  EVENT_SYNC_REP);
+ 	}
+ 
+ 	/*
+diff --git a/src/backend/replication/walreceiver.c b/src/backend/replication/walreceiver.c
+index 413ee3a..dfd7d37 100644
+--- a/src/backend/replication/walreceiver.c
++++ b/src/backend/replication/walreceiver.c
+@@ -486,7 +486,8 @@ WalReceiverMain(void)
+ 								   WL_POSTMASTER_DEATH | WL_SOCKET_READABLE |
+ 									   WL_TIMEOUT | WL_LATCH_SET,
+ 									   wait_fd,
+-									   NAPTIME_PER_CYCLE);
++									   NAPTIME_PER_CYCLE,
++									   EVENT_WAL_RECEIVER_MAIN);
+ 				if (rc & WL_LATCH_SET)
+ 				{
+ 					ResetLatch(&walrcv->latch);
+@@ -685,7 +686,8 @@ WalRcvWaitForStartPosition(XLogRecPtr *startpoint, TimeLineID *startpointTLI)
+ 		}
+ 		SpinLockRelease(&walrcv->mutex);
+ 
+-		WaitLatch(&walrcv->latch, WL_LATCH_SET | WL_POSTMASTER_DEATH, 0);
++		WaitLatch(&walrcv->latch, WL_LATCH_SET | WL_POSTMASTER_DEATH, 0,
++				  EVENT_WAL_RECEIVER_WAIT_START);
+ 	}
+ 
+ 	if (update_process_title)
+diff --git a/src/backend/replication/walsender.c b/src/backend/replication/walsender.c
+index a0dba19..45d9471 100644
+--- a/src/backend/replication/walsender.c
++++ b/src/backend/replication/walsender.c
+@@ -1146,7 +1146,8 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid,
+ 
+ 		/* Sleep until something happens or we time out */
+ 		WaitLatchOrSocket(MyLatch, wakeEvents,
+-						  MyProcPort->sock, sleeptime);
++						  MyProcPort->sock, sleeptime,
++						  EVENT_WAL_SENDER_WRITE_DATA);
+ 	}
+ 
+ 	/* reactivate latch so WalSndLoop knows to continue */
+@@ -1272,7 +1273,8 @@ WalSndWaitForWal(XLogRecPtr loc)
+ 
+ 		/* Sleep until something happens or we time out */
+ 		WaitLatchOrSocket(MyLatch, wakeEvents,
+-						  MyProcPort->sock, sleeptime);
++						  MyProcPort->sock, sleeptime,
++						  EVENT_WAL_SENDER_WAIT_WAL);
+ 	}
+ 
+ 	/* reactivate latch so WalSndLoop knows to continue */
+@@ -1923,7 +1925,8 @@ WalSndLoop(WalSndSendDataCallback send_data)
+ 
+ 			/* Sleep until something happens or we time out */
+ 			WaitLatchOrSocket(MyLatch, wakeEvents,
+-							  MyProcPort->sock, sleeptime);
++							  MyProcPort->sock, sleeptime,
++							  EVENT_WAL_SENDER_MAIN);
+ 		}
+ 	}
+ 	return;
+diff --git a/src/backend/storage/ipc/latch.c b/src/backend/storage/ipc/latch.c
+index 9def8a1..e6cc6d0 100644
+--- a/src/backend/storage/ipc/latch.c
++++ b/src/backend/storage/ipc/latch.c
+@@ -55,6 +55,7 @@
+ #endif
+ 
+ #include "miscadmin.h"
++#include "pgstat.h"
+ #include "portability/instr_time.h"
+ #include "postmaster/postmaster.h"
+ #include "storage/barrier.h"
+@@ -122,6 +123,43 @@ struct WaitEventSet
+ #endif
+ };
+ 
++/* This must match enum WaitEventIdentifier! */
++const char *const WaitEventNames[] = {
++	"ArchiverMain",
++	"AutoVacuumMain",
++	"BaseBackupThrottle",
++	"BgWorkerStartup",
++	"BgWorkerShutdown",
++	"BgWriterMain",
++	"BgWriterHibernate",
++	"CheckpointerMain",
++	"ExecuteGather",
++	"Extension",
++	"MessageQueuePutMessage",
++	"MessageQueueSend",
++	"MessageQueueReceive",
++	"MessageQueueInternal",
++	"ParallelFinish",
++	"PgStatMain",
++	"ProcSleep",
++	"ProcSignal",
++	"PgSleep",
++	"SecureRead",
++	"SecureWrite",
++	"SSLOpenServer",
++	"SyncRep",
++	"SysLoggerMain",
++	"RecoveryApplyDelay",
++	"RecoveryWalAll",
++	"RecoveryWalStream",
++	"WalReceiverWaitStart",
++	"WalReceiverMain",
++	"WalSenderMain",
++	"WalSenderWaitForWAL",
++	"WalSenderWriteData"
++	"WalWriterMain",
++};
++
+ #ifndef WIN32
+ /* Are we currently in WaitLatch? The signal handler would like to know. */
+ static volatile sig_atomic_t waiting = false;
+@@ -297,9 +335,11 @@ DisownLatch(volatile Latch *latch)
+  * we return all of them in one call, but we will return at least one.
+  */
+ int
+-WaitLatch(volatile Latch *latch, int wakeEvents, long timeout)
++WaitLatch(volatile Latch *latch, int wakeEvents, long timeout,
++		  WaitEventIdentifier eventId)
+ {
+-	return WaitLatchOrSocket(latch, wakeEvents, PGINVALID_SOCKET, timeout);
++	return WaitLatchOrSocket(latch, wakeEvents, PGINVALID_SOCKET, timeout,
++							 eventId);
+ }
+ 
+ /*
+@@ -316,7 +356,7 @@ WaitLatch(volatile Latch *latch, int wakeEvents, long timeout)
+  */
+ int
+ WaitLatchOrSocket(volatile Latch *latch, int wakeEvents, pgsocket sock,
+-				  long timeout)
++				  long timeout, WaitEventIdentifier eventId)
+ {
+ 	int			ret = 0;
+ 	int			rc;
+@@ -344,7 +384,7 @@ WaitLatchOrSocket(volatile Latch *latch, int wakeEvents, pgsocket sock,
+ 		AddWaitEventToSet(set, ev, sock, NULL, NULL);
+ 	}
+ 
+-	rc = WaitEventSetWait(set, timeout, &event, 1);
++	rc = WaitEventSetWait(set, timeout, &event, 1, eventId);
+ 
+ 	if (rc == 0)
+ 		ret |= WL_TIMEOUT;
+@@ -863,7 +903,8 @@ WaitEventAdjustWin32(WaitEventSet *set, WaitEvent *event)
+  */
+ int
+ WaitEventSetWait(WaitEventSet *set, long timeout,
+-				 WaitEvent *occurred_events, int nevents)
++				 WaitEvent *occurred_events, int nevents,
++				 WaitEventIdentifier eventId)
+ {
+ 	int			returned_events = 0;
+ 	instr_time	start_time;
+@@ -872,6 +913,8 @@ WaitEventSetWait(WaitEventSet *set, long timeout,
+ 
+ 	Assert(nevents > 0);
+ 
++	pgstat_report_wait_start(WAIT_EVENT_SET, (uint16) eventId);
++
+ 	/*
+ 	 * Initialize timeout if requested.  We must record the current time so
+ 	 * that we can determine the remaining timeout if interrupted.
+@@ -960,6 +1003,8 @@ WaitEventSetWait(WaitEventSet *set, long timeout,
+ 	waiting = false;
+ #endif
+ 
++	pgstat_report_wait_end();
++
+ 	return returned_events;
+ }
+ 
+@@ -1491,6 +1536,20 @@ WaitEventSetWaitBlock(WaitEventSet *set, int cur_timeout,
+ }
+ #endif
+ 
++
++/*
++ * Return an identifier for a Latch depending on an event for statistics
++ * collector.
++ */
++const char *
++GetWaitEventIdentifier(uint16 eventId)
++{
++	if (eventId > EVENT_LAST_TYPE)
++		return "???";
++	return WaitEventNames[eventId];
++}
++
++
+ /*
+  * SetLatch uses SIGUSR1 to wake up the process waiting on the latch.
+  *
+diff --git a/src/backend/storage/ipc/shm_mq.c b/src/backend/storage/ipc/shm_mq.c
+index 5b32782..af5344c 100644
+--- a/src/backend/storage/ipc/shm_mq.c
++++ b/src/backend/storage/ipc/shm_mq.c
+@@ -894,7 +894,7 @@ shm_mq_send_bytes(shm_mq_handle *mqh, Size nbytes, const void *data,
+ 			 * at top of loop, because setting an already-set latch is much
+ 			 * cheaper than setting one that has been reset.
+ 			 */
+-			WaitLatch(MyLatch, WL_LATCH_SET, 0);
++			WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_MQ_SEND_BYTES);
+ 
+ 			/* Reset the latch so we don't spin. */
+ 			ResetLatch(MyLatch);
+@@ -991,7 +991,7 @@ shm_mq_receive_bytes(shm_mq *mq, Size bytes_needed, bool nowait,
+ 		 * loop, because setting an already-set latch is much cheaper than
+ 		 * setting one that has been reset.
+ 		 */
+-		WaitLatch(MyLatch, WL_LATCH_SET, 0);
++		WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_MQ_RECEIVE_BYTES);
+ 
+ 		/* Reset the latch so we don't spin. */
+ 		ResetLatch(MyLatch);
+@@ -1090,7 +1090,7 @@ shm_mq_wait_internal(volatile shm_mq *mq, PGPROC *volatile * ptr,
+ 		}
+ 
+ 		/* Wait to be signalled. */
+-		WaitLatch(MyLatch, WL_LATCH_SET, 0);
++		WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_MQ_WAIT_INTERNAL);
+ 
+ 		/* Reset the latch so we don't spin. */
+ 		ResetLatch(MyLatch);
+diff --git a/src/backend/storage/lmgr/proc.c b/src/backend/storage/lmgr/proc.c
+index 9a758bd..2ed3f41 100644
+--- a/src/backend/storage/lmgr/proc.c
++++ b/src/backend/storage/lmgr/proc.c
+@@ -1216,7 +1216,7 @@ ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable)
+ 		}
+ 		else
+ 		{
+-			WaitLatch(MyLatch, WL_LATCH_SET, 0);
++			WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_PROC_SLEEP);
+ 			ResetLatch(MyLatch);
+ 			/* check for deadlocks first, as that's probably log-worthy */
+ 			if (got_deadlock_timeout)
+@@ -1728,7 +1728,7 @@ CheckDeadLockAlert(void)
+ void
+ ProcWaitForSignal(void)
+ {
+-	WaitLatch(MyLatch, WL_LATCH_SET, 0);
++	WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_PROC_SIGNAL);
+ 	ResetLatch(MyLatch);
+ 	CHECK_FOR_INTERRUPTS();
+ }
+diff --git a/src/backend/utils/adt/misc.c b/src/backend/utils/adt/misc.c
+index 5e705e9..ea88c87 100644
+--- a/src/backend/utils/adt/misc.c
++++ b/src/backend/utils/adt/misc.c
+@@ -560,7 +560,7 @@ pg_sleep(PG_FUNCTION_ARGS)
+ 
+ 		(void) WaitLatch(MyLatch,
+ 						 WL_LATCH_SET | WL_TIMEOUT,
+-						 delay_ms);
++						 delay_ms, EVENT_PG_SLEEP);
+ 		ResetLatch(MyLatch);
+ 	}
+ 
+diff --git a/src/include/pgstat.h b/src/include/pgstat.h
+index dc3320d..bca16e4 100644
+--- a/src/include/pgstat.h
++++ b/src/include/pgstat.h
+@@ -721,7 +721,8 @@ typedef enum WaitClass
+ 	WAIT_LWLOCK_NAMED,
+ 	WAIT_LWLOCK_TRANCHE,
+ 	WAIT_LOCK,
+-	WAIT_BUFFER_PIN
++	WAIT_BUFFER_PIN,
++	WAIT_EVENT_SET
+ }	WaitClass;
+ 
+ 
+diff --git a/src/include/storage/latch.h b/src/include/storage/latch.h
+index 5179ecc..18c78de 100644
+--- a/src/include/storage/latch.h
++++ b/src/include/storage/latch.h
+@@ -135,6 +135,51 @@ typedef struct WaitEvent
+ 	void	   *user_data;		/* pointer provided in AddWaitEventToSet */
+ } WaitEvent;
+ 
++/*
++ * List of latch identifiers used when reporting activity to statistics
++ * collector. Up to 256 different WaitEventIdentifier can be handled.
++ */
++typedef enum WaitEventIdentifier
++{
++	EVENT_ARCHIVER_MAIN,
++	EVENT_AUTOVACUUM_MAIN,
++	EVENT_BASEBACKUP_THROTTLE,
++	EVENT_BGWORKER_STARTUP,
++	EVENT_BGWORKER_SHUTDOWN,
++	EVENT_BGWRITER_MAIN,
++	EVENT_BGWRITER_HIBERNATE,
++	EVENT_CHECKPOINTER_MAIN,
++	EVENT_EXECUTE_GATHER,
++	EVENT_EXTENSION,
++	EVENT_MQ_PUT_MESSAGE,
++	EVENT_MQ_SEND_BYTES,
++	EVENT_MQ_RECEIVE_BYTES,
++	EVENT_MQ_WAIT_INTERNAL,
++	EVENT_PARALLEL_WAIT_FINISH,
++	EVENT_PGSTAT_MAIN,
++	EVENT_PROC_SLEEP,
++	EVENT_PROC_SIGNAL,
++	EVENT_PG_SLEEP,
++	EVENT_SECURE_READ,
++	EVENT_SECURE_WRITE,
++	EVENT_SSL_OPEN_SERVER,
++	EVENT_SYNC_REP,
++	EVENT_SYSLOGGER_MAIN,
++	EVENT_RECOVERY_APPLY_DELAY,
++	EVENT_RECOVERY_WAL_ALL,
++	EVENT_RECOVERY_WAL_STREAM,
++	EVENT_WAL_RECEIVER_WAIT_START,
++	EVENT_WAL_RECEIVER_MAIN,
++	EVENT_WAL_SENDER_WRITE_DATA,
++	EVENT_WAL_SENDER_MAIN,
++	EVENT_WAL_SENDER_WAIT_WAL,
++	EVENT_WALWRITER_MAIN
++} WaitEventIdentifier;
++
++#define EVENT_LAST_TYPE EVENT_WALWRITER_MAIN
++
++extern const char *const WaitEventName[];
++
+ /* forward declaration to avoid exposing latch.c implementation details */
+ typedef struct WaitEventSet WaitEventSet;
+ 
+@@ -155,10 +200,14 @@ extern int AddWaitEventToSet(WaitEventSet *set, uint32 events, pgsocket fd,
+ 				  Latch *latch, void *user_data);
+ extern void ModifyWaitEvent(WaitEventSet *set, int pos, uint32 events, Latch *latch);
+ 
+-extern int	WaitEventSetWait(WaitEventSet *set, long timeout, WaitEvent *occurred_events, int nevents);
+-extern int	WaitLatch(volatile Latch *latch, int wakeEvents, long timeout);
++extern int	WaitEventSetWait(WaitEventSet *set, long timeout,
++				  WaitEvent *occurred_events, int nevents,
++				  WaitEventIdentifier eventId);
++extern int	WaitLatch(volatile Latch *latch, int wakeEvents, long timeout,
++				  WaitEventIdentifier eventId);
+ extern int WaitLatchOrSocket(volatile Latch *latch, int wakeEvents,
+-				  pgsocket sock, long timeout);
++				  pgsocket sock, long timeout, WaitEventIdentifier eventId);
++extern const char *GetWaitEventIdentifier(uint16 eventId);
+ 
+ /*
+  * Unix implementation uses SIGUSR1 for inter-process signaling.
+diff --git a/src/test/modules/test_shm_mq/setup.c b/src/test/modules/test_shm_mq/setup.c
+index 143df4e..d32e42e 100644
+--- a/src/test/modules/test_shm_mq/setup.c
++++ b/src/test/modules/test_shm_mq/setup.c
+@@ -279,7 +279,7 @@ wait_for_workers_to_become_ready(worker_state *wstate,
+ 		}
+ 
+ 		/* Wait to be signalled. */
+-		WaitLatch(MyLatch, WL_LATCH_SET, 0);
++		WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_EXTENSION);
+ 
+ 		/* Reset the latch so we don't spin. */
+ 		ResetLatch(MyLatch);
+diff --git a/src/test/modules/test_shm_mq/test.c b/src/test/modules/test_shm_mq/test.c
+index dd34bc7..caddf83 100644
+--- a/src/test/modules/test_shm_mq/test.c
++++ b/src/test/modules/test_shm_mq/test.c
+@@ -230,7 +230,7 @@ test_shm_mq_pipelined(PG_FUNCTION_ARGS)
+ 			 * have read or written data and therefore there may now be work
+ 			 * for us to do.
+ 			 */
+-			WaitLatch(MyLatch, WL_LATCH_SET, 0);
++			WaitLatch(MyLatch, WL_LATCH_SET, 0, EVENT_EXTENSION);
+ 			ResetLatch(MyLatch);
+ 			CHECK_FOR_INTERRUPTS();
+ 		}
+diff --git a/src/test/modules/worker_spi/worker_spi.c b/src/test/modules/worker_spi/worker_spi.c
+index 314e371..bb0d7ff 100644
+--- a/src/test/modules/worker_spi/worker_spi.c
++++ b/src/test/modules/worker_spi/worker_spi.c
+@@ -227,7 +227,8 @@ worker_spi_main(Datum main_arg)
+ 		 */
+ 		rc = WaitLatch(MyLatch,
+ 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+-					   worker_spi_naptime * 1000L);
++					   worker_spi_naptime * 1000L,
++					   EVENT_EXTENSION);
+ 		ResetLatch(MyLatch);
+ 
+ 		/* emergency bailout if postmaster has died */
